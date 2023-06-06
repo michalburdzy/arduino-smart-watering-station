@@ -6,14 +6,23 @@
 #define MOISTURE_SENSOR_PIN_4 A4
 #define PUMP_1_PIN 11
 #define PUMP_2_PIN 12
-#define HUMIDITY_THRESHOLD_LOW 400
+
+enum SoilHumidity
+{
+  ARID,
+  DRY,
+  MEDIUM,
+  HUMID,
+  WET,
+  INCORRECT_SENSOR_READ,
+};
 
 struct HumidityMeasurements
 {
-  int sensor1Value;
-  int sensor2Value;
-  int sensor3Value;
-  int sensor4Value;
+  SoilHumidity sensor1Value;
+  SoilHumidity sensor2Value;
+  SoilHumidity sensor3Value;
+  SoilHumidity sensor4Value;
 };
 
 struct WateringStationConfig
@@ -34,6 +43,14 @@ WateringStationConfig config =
         0,
 };
 
+void checkIfShouldWatering(unsigned long currentMillis);
+void runPumps(unsigned long currentMillis);
+void runPump(int pin, int enable);
+int measureHumidity(int pin);
+HumidityMeasurements measureHumidityForAllSensors();
+SoilHumidity mapIntToSoliHumidity(int value);
+bool isOneOfHumidityValuesDry(SoilHumidity value1, SoilHumidity value2);
+
 void setup()
 {
   Serial.begin(9600);
@@ -45,12 +62,6 @@ void setup()
   pinMode(PUMP_1_PIN, OUTPUT);
   pinMode(PUMP_2_PIN, OUTPUT);
 }
-
-void checkIfShouldWatering(unsigned long currentMillis);
-void runPumps(unsigned long currentMillis);
-void runPump(int pin, int enable);
-int measureHumidity(int pin);
-HumidityMeasurements measureHumidityForAllSensors();
 
 void loop()
 {
@@ -69,21 +80,28 @@ void checkIfShouldWatering(unsigned long currentMillis)
     HumidityMeasurements humiditySensorReads = measureHumidityForAllSensors();
 
     unsigned long runPumpUntil = currentMillis + config.pumpWateringTimeMillis;
-    bool shouldRunPump1 = humiditySensorReads.sensor1Value < HUMIDITY_THRESHOLD_LOW && humiditySensorReads.sensor2Value < HUMIDITY_THRESHOLD_LOW;
-    bool shouldRunPump2 = humiditySensorReads.sensor3Value < HUMIDITY_THRESHOLD_LOW && humiditySensorReads.sensor4Value < HUMIDITY_THRESHOLD_LOW;
+    bool shouldRunPump1 = isOneOfHumidityValuesDry(humiditySensorReads.sensor1Value, humiditySensorReads.sensor2Value);
+    bool shouldRunPump2 = isOneOfHumidityValuesDry(humiditySensorReads.sensor3Value, humiditySensorReads.sensor4Value);
 
     if (shouldRunPump1)
     {
+      Serial.println("Running pump 1");
       config.pump1RunUntil = runPumpUntil;
     }
 
     if (shouldRunPump2)
     {
+      Serial.println("Running pump 2");
       config.pump2RunUntil = runPumpUntil;
     }
 
     config.lastWateringTime = currentMillis + config.wateringTimeout;
   }
+}
+
+bool isOneOfHumidityValuesDry(SoilHumidity value1, SoilHumidity value2)
+{
+  return value1 == ARID || value1 == DRY || value2 == ARID || value2 == DRY;
 }
 
 void runPumps(unsigned long currentMillis)
@@ -126,11 +144,12 @@ int measureHumidity(int pin)
 
 HumidityMeasurements measureHumidityForAllSensors()
 {
+
   HumidityMeasurements humiditySensorReads = {
-      measureHumidity(MOISTURE_SENSOR_PIN_1),
-      measureHumidity(MOISTURE_SENSOR_PIN_2),
-      measureHumidity(MOISTURE_SENSOR_PIN_3),
-      measureHumidity(MOISTURE_SENSOR_PIN_4),
+      mapIntToSoliHumidity(measureHumidity(MOISTURE_SENSOR_PIN_1)),
+      mapIntToSoliHumidity(measureHumidity(MOISTURE_SENSOR_PIN_2)),
+      mapIntToSoliHumidity(measureHumidity(MOISTURE_SENSOR_PIN_3)),
+      mapIntToSoliHumidity(measureHumidity(MOISTURE_SENSOR_PIN_4)),
   };
 
   Serial.print("humidity sensor 1: ");
@@ -143,4 +162,37 @@ HumidityMeasurements measureHumidityForAllSensors()
   Serial.println(humiditySensorReads.sensor4Value);
 
   return humiditySensorReads;
+};
+
+SoilHumidity mapIntToSoliHumidity(int value)
+{
+  // woda 300-320
+  // mokra ziemia 350-360
+  // sucha ziemia 880-1013
+
+  if (value < 350)
+  {
+    return WET;
+  }
+  if (value < 500)
+  {
+    return HUMID;
+  }
+
+  if (value < 700)
+  {
+    return MEDIUM;
+  }
+
+  if (value < 900)
+  {
+    return DRY;
+  }
+
+  if (value < 1024)
+  {
+    return ARID;
+  }
+
+  return INCORRECT_SENSOR_READ;
 };
